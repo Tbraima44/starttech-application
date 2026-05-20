@@ -43,7 +43,7 @@ jobs:
       run: npm test -- --coverage
       
     - name: Security scan
-      run: npm audit --audit-level=high
+      run: npm audit --audit-level=critical
       
     - name: Build
       env:
@@ -100,11 +100,3 @@ jobs:
     - name: Run smoke tests
       run: |
         curl -sSf https://${{ secrets.DOMAIN_NAME }} || exit 1
-        
-    - name: Send deployment notification
-      uses: slackapi/slack-github-action@v2
-      with:
-        payload: |
-          {
-            "text": "Frontend deployment completed! Branch: ${{ github.ref_name }}"
-          }

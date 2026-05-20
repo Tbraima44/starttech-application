@@ -150,11 +150,3 @@ jobs:
           sleep 10
         done
         echo "Health check failed"; exit 1
-        
-    - name: Send deployment notification
-      uses: slackapi/slack-github-action@v2
-      with:
-        payload: |
-          {
-            "text": "Backend deployment completed! Branch: ${{ github.ref_name }}"
-          }
