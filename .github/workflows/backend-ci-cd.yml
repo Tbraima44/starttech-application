@@ -1,0 +1,162 @@
+# .github/workflows/backend-ci-cd.yml
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - 'backend/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+env:
+  GO_VERSION: '1.25'
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    name: Test and Quality Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        
+    - name: Install dependencies
+      run: go mod download
+      
+    - name: Run linting
+      run: |
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        golangci-lint run --timeout=5m
+        
+    - name: Run unit tests
+      run: go test -v -race -coverprofile=coverage.out ./...
+      
+    - name: Run integration tests
+      env:
+        REDIS_ADDR: redis:6379
+        MONGO_URI: mongodb://mongodb:27017/todos
+      run: go test -v -tags=integration ./...
+      
+    - name: Security scan
+      run: |
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        gosec ./...
+
+  build-and-push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      
+    - name: Set image tag
+      run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        echo "IMAGE_TAG=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_ENV
+        echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+        
+    - name: Build Docker image
+      run: |
+        docker build \
+          -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }} \
+          -t $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:latest \
+          ./backend
+          
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ env.ECR_REGISTRY }}/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}'
+        format: 'table'
+        exit-code: '1'
+        ignore-unfixed: true
+        severity: 'CRITICAL,HIGH'
+        
+    - name: Push Docker image
+      run: |
+        docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+        docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:latest
+
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+        
+    - name: Trigger Auto Scaling Group rolling update
+      run: |
+        aws autoscaling start-instance-refresh \
+          --auto-scaling-group-name ${{ secrets.ASG_NAME }} \
+          --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300}'
+          
+    - name: Wait for instance refresh completion
+      run: |
+        ASG_NAME="${{ secrets.ASG_NAME }}"
+        while true; do
+          STATUS=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name $ASG_NAME \
+            --query 'InstanceRefreshes[0].Status' --output text)
+          echo "Instance refresh status: $STATUS"
+          if [ "$STATUS" = "Successful" ]; then break; fi
+          if [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then exit 1; fi
+          sleep 30
+        done
+        
+    - name: Health check
+      run: |
+        for i in {1..30}; do
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.ALB_DNS }}/ping)
+          if [ "$HTTP_CODE" -eq 200 ]; then echo "Health check passed"; exit 0; fi
+          sleep 10
+        done
+        echo "Health check failed"; exit 1
+        
+    - name: Send deployment notification
+      uses: slackapi/slack-github-action@v2
+      with:
+        payload: |
+          {
+            "text": "Backend deployment completed! Branch: ${{ github.ref_name }}"
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
