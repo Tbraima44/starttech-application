@@ -1,32 +1,5 @@
 A full-stack todo application with React frontend, Go backend, Redis caching, and MongoDB database.
 
-## 🏗️ Architecture
-
-```
-
-┌─────────────────────────────────────────────────────────┐
-│                      Client Browser                      │
-└───────────────┬─────────────────────┬───────────────────┘
-│                     │
-┌───────▼──────┐      ┌──────▼──────┐
-│  CloudFront  │      │     ALB     │
-│     CDN      │      │  (HTTP/HTTPS)│
-└───────┬──────┘      └──────┬──────┘
-│                     │
-┌───────▼──────┐      ┌──────▼──────┐
-│  S3 Bucket   │      │  EC2 Auto   │
-│  (Static)    │      │  Scaling    │
-└──────────────┘      │  Group      │
-└──────┬──────┘
-│
-┌────────────┼────────────┐
-│            │            │
-┌───────▼──────┐ ┌──▼────┐ ┌─────▼─────┐
-│   Backend    │ │ Redis │ │ MongoDB   │
-│   (Go API)   │ │ Cache │ │ (Atlas)   │
-└──────────────┘ └───────┘ └───────────┘
-
-```
 
 ## 📦 Tech Stack
 
