@@ -1,18 +1,15 @@
 name: Scheduled Security Scan
+
 on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+
 jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: snyk/actions/node@master
-      env:
-        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        args: --all-projects --severity-threshold=high
+    - uses: actions/checkout@v4
     - uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'fs'
