@@ -16,39 +16,12 @@ This application is a full-stack todo platform composed of a React frontend, a G
 
 ## Architecture diagram
 
-```
-
-┌─────────────────────────────────────────────────────────┐
-│                      Client Browser                      │
-└───────────────┬─────────────────────┬───────────────────┘
-│                     │
-┌───────▼──────┐      ┌──────▼──────┐
-│  CloudFront  │      │     ALB     │
-│     CDN      │      │  (HTTP/HTTPS)│
-└───────┬──────┘      └──────┬──────┘
-│                     │
-┌───────▼──────┐      ┌──────▼──────┐
-│  S3 Bucket   │      │  EC2 Auto   │
-│  (Static)    │      │  Scaling    │
-└──────────────┘      │  Group      │
-└──────┬──────┘
-│
-┌────────────┼────────────┐
-│            │            │
-┌───────▼──────┐ ┌──▼────┐ ┌─────▼─────┐
-│   Backend    │ │ Redis │ │ MongoDB   │
-│   (Go API)   │ │ Cache │ │ (Atlas)   │
-└──────────────┘ └───────┘ └───────────┘
-
-```
+![alt text](Starttech-Application.png)
 
 ## Request flow
 
-1. The user opens the frontend in the browser.
-2. The React app communicates with the Go API.
-3. The backend applies request validation, middleware, and business logic.
-4. The backend reads or writes todo data in MongoDB.
-5. Redis is used as a cache layer for fast access and reduced database load.
+The frontend is served from S3 through CloudFront, which also proxies API requests to the Application Load Balancer (ALB). The ALB distributes traffic to a fleet of EC2 instances running the Go backend inside Docker containers. The backend connects to MongoDB Atlas for persistent storage and to ElastiCache Redis for caching/sessions. All logs and metrics flow into CloudWatch.
+
 
 ## Deployment view
 
